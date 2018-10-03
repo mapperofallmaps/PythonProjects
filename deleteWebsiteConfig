@@ -1,0 +1,91 @@
+import requests
+import sys
+import argparse
+import re
+from queue import Queue
+from threading import Thread
+
+api_endpoints = {
+    'test': [
+        'http://api-test.homeaway.com/distributions/0000/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api-test.homeaway.com/distributions/0001/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api-test.homeaway.com/distributions/0002/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api-test.homeaway.com/distributions/0003/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api-test.homeaway.com/distributions/0004/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+    ],
+    'stage': [
+        'http://api-stage.homeaway.com/distributions/0000/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api-stage.homeaway.com/distributions/0001/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api-stage.homeaway.com/distributions/0002/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api-stage.homeaway.com/distributions/0003/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api-stage.homeaway.com/distributions/0004/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+    ],
+    'prod': [
+        'http://api.homeaway.com/distributions/0000/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api.homeaway.com/distributions/0001/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api.homeaway.com/distributions/0002/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api.homeaway.com/distributions/0003/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+        'http://api.homeaway.com/distributions/0004/{distribution_UUID}/removeUnitDistributionWebsiteConfiguration',
+    ]
+}
+
+
+class distributionConfigDeleter(Thread):
+    def __init__(self, queue):
+        Thread.__init__(self)
+        self.queue = queue
+
+    def run(self):
+        while True:
+            url, headers, querystring = self.queue.get()
+            response = requests.request("POST", url, headers=headers, params=querystring)
+            if response.status_code == requests.codes.ok:
+                print('Successfully deleted unit distribution website configuration')
+            self.queue.task_done()
+
+
+def main():
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true", help="Dry run only")
+    parser.add_argument("env", help="Environment to access")
+    parser.add_argument("bearerToken", help="Auth bearer token")
+    parser.add_argument("distribution_UUID", help="Unique user identification")
+    parser.add_argument("affiliateName", help="Name of affiliate")
+    parser.add_argument("site", help="Name of site")
+    args = parser.parse_args()
+
+    # Test connection to HomeAway API
+    try:
+        [requests.get('http://api-test.homeaway.com/distributions/0000/' + args.distribution_UUID)]
+    except:
+        sys.exit('Failed to connect to HomeAway API ' + args.env + 'servers')
+
+    querystring = {"affiliateName": args.affiliateName, "site": args.site}
+
+    # Add Headers
+    headers = {
+        'X-HomeAway-ApiVersion': "*",
+        'Authorization': f"Bearer {args.bearerToken}",
+        'Cache-Control': "no-cache",
+    }
+
+    queue = Queue()
+
+    for x in range(8):
+        worker = distributionConfigDeleter(queue)
+        worker.daemon = True
+        worker.start()
+
+    for entry in api_endpoints[args.env]:
+        url = re.sub('{distribution_UUID}', args.distribution_UUID, entry)
+        queue.put((url, headers, querystring))
+
+    queue.join()
+
+
+if __name__ == '__main__':
+    main()
+
+
+
